@@ -3,17 +3,15 @@ import * as Survey from "survey-react";
 import uuid from "uuid/v4";
 
 import "./App.css";
-import questionnaire from './questionnaire'
+
+const BACKEND_URL = "http://localhost:4000";
 
 class App extends Component {
   constructor() {
     super();
 
-    this.survey = new Survey.Model(questionnaire);
     this.state = {
-      phase: 0,
-      questionIndex: 1,
-      questionsCount: this.survey.getAllQuestions().length
+      phase: -1
     }
 
     this.onValueChanged = this.onValueChanged.bind(this);
@@ -22,7 +20,25 @@ class App extends Component {
   componentWillMount() {
     window.npm_submit = this.onSubmit.bind(this);
 
-    document.title = "Fragen: " + document.location.pathname.replace('/', '')
+    const surveyName = document.location.pathname.replace('/', '');
+    document.title = "Fragen: " + surveyName;
+
+    fetch(BACKEND_URL + "/fragen/" + surveyName)
+      .then((response) => response.json())
+      .then((questionnaire) => {
+        this.questionnaire = questionnaire;
+        this.survey = new Survey.Model(questionnaire);
+        document.title = questionnaire.title;
+        this.setState({
+          phase: 0,
+          questionIndex: 1,
+          questionsCount: this.survey.getAllQuestions().length
+        })
+      })
+      .catch((error) => {
+        alert("Ein schlimmer Fehler ist passiert. Neu laden?");
+        console.error(error);
+      });
   }
 
   onValueChanged(result) {
@@ -48,7 +64,7 @@ class App extends Component {
       window.scrollTo({ top: document.body.clientHeight, behavior: "smooth" });
 
       const currentQuestionName = this.survey.getAllQuestions(true).pop().propertyHash.name;
-      const questionIndex = questionnaire.elements.findIndex(question => question.name === currentQuestionName);
+      const questionIndex = this.questionnaire.elements.findIndex(question => question.name === currentQuestionName);
 
       this.setState({
         questionIndex: questionIndex + 1
@@ -60,7 +76,7 @@ class App extends Component {
     this.data.uuid = uuid();
     this.setState({ phase: 2 });
 
-    fetch('http://localhost:4000/save/wohnungen', {
+    fetch(BACKEND_URL + '/save/wohnungen', {
       method: 'POST',
       mode: 'cors',
       headers: {
@@ -85,10 +101,17 @@ class App extends Component {
   }
 
   renderContent(phase) {
+    if (phase === -1) {
+      return (
+        <div className="sv_row">
+          <h1>Lade...</h1>
+        </div>
+      );
+    }
     if (phase === 0) {
       return (
         <div className="sv_row">
-          <div dangerouslySetInnerHTML={{__html: questionnaire.intro}} />
+          <div dangerouslySetInnerHTML={{__html: this.questionnaire.intro}} />
           <div style={{textAlign: 'right'}}>
             <button type="button" onClick={() => this.setState({ phase: 1 })}>Los geht's!</button>
           </div>
@@ -106,7 +129,7 @@ class App extends Component {
     if (phase === 3) {
       return (
         <div className="sv_row">
-          <div dangerouslySetInnerHTML={{__html: questionnaire.outro.replace('{uuid}', this.data.uuid)}} />
+          <div dangerouslySetInnerHTML={{__html: this.questionnaire.outro.replace('{uuid}', this.data.uuid)}} />
         </div>
       );
     }
@@ -146,7 +169,7 @@ class App extends Component {
                 style={{width: `${progress}%`}} />
             </div>
             <div className="npm_header_text">
-              <h1>Umfrage zur Wohnungssituation</h1>
+              <h1>{this.questionnaire ? this.questionnaire.title : "Fragen"}</h1>
               {/*<div className="npm_progress">*/}
                 {/*Frage {this.state.questionIndex} / {this.state.questionsCount}*/}
               {/*</div>*/}
