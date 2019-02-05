@@ -1,10 +1,12 @@
 import React, { Component } from "react";
 import * as Survey from "survey-react";
 import uuid from "uuid/v4";
+import showdown from "showdown";
 
 import "./App.css";
 
-const BACKEND_URL = "http://localhost:4000";
+Survey.JsonObject.metaData.addProperty("question", "unit:text");
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 
 class App extends Component {
   constructor() {
@@ -21,13 +23,34 @@ class App extends Component {
     window.npm_submit = this.onSubmit.bind(this);
 
     const surveyName = document.location.pathname.replace('/', '');
+    if (surveyName.length === 0) {
+      this.setState({phase: 'landingPage'});
+      return;
+    }
+
     document.title = "Fragen: " + surveyName;
 
     fetch(BACKEND_URL + "/fragen/" + surveyName)
-      .then((response) => response.json())
+      .then((response) => {
+        if (response.status === 200) {
+          return response.json();
+        }
+        throw new Error("statusCode=" + response.status);
+      })
       .then((questionnaire) => {
         this.questionnaire = questionnaire;
         this.survey = new Survey.Model(questionnaire);
+
+        const converter = new showdown.Converter();
+        this.survey
+          .onTextMarkdown
+          .add(function (survey, options) {
+            //convert the mardown text to html
+            const str = converter.makeHtml(options.text);
+            //remove <p> & </p>; set html
+            options.html = str.substring(3, str.length - 4);
+          });
+
         document.title = questionnaire.title;
         this.setState({
           phase: 0,
@@ -36,29 +59,21 @@ class App extends Component {
         })
       })
       .catch((error) => {
-        alert("Ein schlimmer Fehler ist passiert. Neu laden?");
+        if (error.message.startsWith('statusCode=')) {
+          let errorCode = parseInt(error.message.replace('statusCode=', ''));
+          let errorMessage = `Ein Fehler ist aufgetreten (${errorCode})`;
+          if (errorCode === 404) {
+            errorMessage = `Es gibt keinen Fragebogen mit Namen "${surveyName}" (Fehler ${errorCode})`;
+          }
+          this.setState({phase: 'error', errorMessage});
+        }
+
         console.error(error);
       });
   }
 
   onValueChanged(result) {
     this.data = result.valuesHash;
-
-    // const undescribedOther = Object.entries(this.data).find(([key, value]) => {
-    //   if (key.endsWith('-Comment')) {
-    //     return false;
-    //   }
-    //   if (value !== 'other') {
-    //     return false;
-    //   }
-    //
-    //   // `this` can't be accessed
-    //   return !Boolean(result.valuesHash[key + '-Comment']);
-    // })
-    //
-    // if (undescribedOther) {
-    //   return;
-    // }
 
     setTimeout(() => {
       window.scrollTo({ top: document.body.clientHeight, behavior: "smooth" });
@@ -100,7 +115,51 @@ class App extends Component {
     })
   }
 
+  onAfterRenderQuestion(survey, question) {
+    question.htmlElement.querySelectorAll('input[type="text"], input[type="number"]')
+      .forEach((element) => {
+        element.addEventListener('keypress', (event) => {
+          if (event.key === "Enter") {
+            element.blur();
+          }
+        });
+        element.focus();
+      });
+
+    if (question.question.unit) {
+      const unitSpan = document.createElement('div');
+      unitSpan.classList.add("unit")
+      unitSpan.innerText = question.question.unit;
+
+      const answerDiv = question.htmlElement.children[1];
+      answerDiv.classList.add("answer-with-unit")
+      answerDiv.append(unitSpan);
+    }
+  }
+
   renderContent(phase) {
+    if (phase === 'error') {
+      return (
+        <div className="sv_row">
+          <h1>{this.state.errorMessage}</h1>
+          Ein schlimmer Fehler ist passiert. Hoffentlich ist es nicht deine Schuld.
+          <div style={{textAlign: 'right', marginTop: '1rem'}}>
+            <button type="button" onClick={() => window.location.reload()}>Nochmal probieren?</button>
+          </div>
+        </div>
+      );
+    }
+    if (phase === 'landingPage') {
+      return (
+        <div className="sv_row">
+          <h1>Fragen / Antworten</h1>
+          Ein <a href="https://github.com/neopostmodern/fragen">Open</a>
+          {' '}<a href="https://github.com/neopostmodern/antworten">Source</a>{' '}
+          Online Fragebogen System von <a href="http://neopostmodern.com">neopostmodern</a>,
+          basierend auf <a href="https://surveyjs.io/">SurveyJS</a>.
+        </div>
+      );
+    }
     if (phase === -1) {
       return (
         <div className="sv_row">
@@ -140,6 +199,7 @@ class App extends Component {
           model={this.survey}
           onAfterRenderPage={this.disableForm}
           onValueChanged={this.onValueChanged}
+          onAfterRenderQuestion={this.onAfterRenderQuestion}
         />
       </div>
     );
@@ -170,9 +230,6 @@ class App extends Component {
             </div>
             <div className="npm_header_text">
               <h1>{this.questionnaire ? this.questionnaire.title : "Fragen"}</h1>
-              {/*<div className="npm_progress">*/}
-                {/*Frage {this.state.questionIndex} / {this.state.questionsCount}*/}
-              {/*</div>*/}
             </div>
           </div>
         </div>
